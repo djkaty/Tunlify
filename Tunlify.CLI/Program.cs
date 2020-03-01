@@ -4,6 +4,8 @@
 
 using System;
 using System.Net;
+using System.Net.Sockets;
+using System.Threading.Tasks;
 using CommandLine;
 using Tunlify.Common;
 
@@ -20,13 +22,12 @@ namespace Tunlify.CLI
 
     class Program
     {
-        public static void Main(string[] args) {
-            Parser.Default.ParseArguments<Options>(args).MapResult(
-                options => Run(options),
-                _ => 1);
-        }
+        public static async Task<int> Main(string[] args) =>
+            await Parser.Default.ParseArguments<Options>(args).MapResult(
+                async options => await Run(options),
+                async _ => await Task.FromResult(1));
 
-        private static int Run(Options options) {
+        private static async Task<int> Run(Options options) {
             if (!IPEndPoint.TryParse(options.SourceIP, out var sourceIP)) {
                 Console.Error.WriteLine("Invalid source IP specified");
                 return 1;
@@ -39,6 +40,15 @@ namespace Tunlify.CLI
 
             Console.WriteLine(sourceIP);
             Console.WriteLine(destIP);
+
+            try {
+                var tunnel = new Tunnel(sourceIP, destIP);
+                await tunnel.StartAsync();
+            }
+            catch (SocketException ex) {
+                Console.Error.WriteLine(ex.Message + " (Windows Sockets error code " + ex.ErrorCode + ")");
+            }
+
             return 0;
         }
     }
