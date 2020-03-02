@@ -5,6 +5,7 @@
 using System;
 using System.Buffers;
 using System.IO;
+using System.IO.Pipelines;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading.Channels;
@@ -47,57 +48,52 @@ namespace Tunlify.Common
 
             using var logFile = new FileStream("log.bin", FileMode.Create, FileAccess.Write, FileShare.Read);
 
-            // Asynchronously forward the contents of a stream to a channel
-            async Task forwardStreamToChannelAsync(NetworkStream stream, Channel<byte[]> channel) {
-                var buffer = ArrayPool<byte>.Shared.Rent(65536);
+            // Asynchronously forward the contents of a stream to a pipe
+            async Task forwardStreamToPipeAsync(NetworkStream stream, Pipe pipe) {
                 int bytesRead;
-                while ((bytesRead = await stream.ReadAsync(buffer, 0, 65536)) != 0) {
-                    var block = new byte[bytesRead];
-                    Buffer.BlockCopy(buffer, 0, block, 0, bytesRead);
-                    await channel.Writer.WriteAsync(block);
-                }
-                ArrayPool<byte>.Shared.Return(buffer);
+                do {
+                    var buffer = pipe.Writer.GetMemory(65536);
+                    bytesRead = await stream.ReadAsync(buffer);
+                    pipe.Writer.Advance(bytesRead); 
+                } while (!(await pipe.Writer.FlushAsync()).IsCompleted && bytesRead > 0);
+
+                pipe.Writer.Complete();
 
                 Console.WriteLine("Stream exhausted");
             }
 
-            // Consume the contents of a channel (the received data)
-            async Task channelConsumer(Channel<byte[]> channel, NetworkStream dest) {
-                await foreach (var block in channel.Reader.ReadAllAsync()) {
+            // Consume the contents of a pipe
+            async Task pipeConsumer(Pipe pipe, NetworkStream dest) {
+                ReadResult readResult;
+                do {
+                    readResult = await pipe.Reader.ReadAsync();
+                    var block = readResult.Buffer.ToArray();
                     await Task.WhenAll(dest.WriteAsync(block).AsTask(), logFile.WriteAsync(block).AsTask());
                     await logFile.FlushAsync();
-                }
 
-                Console.WriteLine("Channel complete");
+                    pipe.Reader.AdvanceTo(readResult.Buffer.End);
+                } while (!readResult.IsCompleted);
+
+                Console.WriteLine("Pipe complete");
             }
 
-            // Set channel options for performance optimization
-            var channelOptions = new UnboundedChannelOptions();
-            channelOptions.SingleWriter = channelOptions.SingleReader = true;
-            channelOptions.AllowSynchronousContinuations = true;
+            // Create a pipe for each side of the connection
+            var sourcePipe = new Pipe();
+            var destPipe = new Pipe();
 
-            // Create a channel for each side of the connection
-            var sourceChannel = Channel.CreateUnbounded<byte[]>(channelOptions);
-            var destChannel = Channel.CreateUnbounded<byte[]>(channelOptions);
+            // Set up stream-to-pipe forwarders
+            var srcToPipeTask = forwardStreamToPipeAsync(incomingStream, sourcePipe);
+            var dstToPipeTask = forwardStreamToPipeAsync(outgoingStream, destPipe);
+
+            // Set up pipe consumers
+            var srcPipeConsumer = pipeConsumer(sourcePipe, outgoingStream);
+            var dstPipeConsumer = pipeConsumer(destPipe, incomingStream);
 
             try {
-                // Set up stream-to-channel forwarders
-                var srcToChannelTask = forwardStreamToChannelAsync(incomingStream, sourceChannel);
-                var dstToChannelTask = forwardStreamToChannelAsync(outgoingStream, destChannel);
+                // Wait for either side of the connection to be closed, then close the other side
+                var completed = await Task.WhenAny(srcToPipeTask, dstToPipeTask);
 
-                // Set up channel consumers
-                var srcChannelConsumer = channelConsumer(sourceChannel, outgoingStream);
-                var dstChannelConsumer = channelConsumer(destChannel, incomingStream);
-
-                // Wait for either side of the connection to be closed
-                await Task.WhenAny(srcToChannelTask, dstToChannelTask);
-
-                // Mark both channels complete
-                sourceChannel.Writer.Complete();
-                destChannel.Writer.Complete();
-
-                // Wait for both channels to be emptied
-                await Task.WhenAll(srcChannelConsumer, dstChannelConsumer);
+                Console.WriteLine("Connection was closed by the " + (completed == srcToPipeTask ? "client" : "server"));
             }
             catch (IOException ex) {
                 // Don't generate an exception if one side terminated the connection
@@ -110,6 +106,9 @@ namespace Tunlify.Common
                 // Close both sides of the connection
                 outgoingConnection.Close();
                 incomingConnection.Close();
+
+                // Wait for both pipes to be emptied
+                await Task.WhenAll(srcPipeConsumer, dstPipeConsumer);
 
                 Console.WriteLine("Connection closed");
             }
