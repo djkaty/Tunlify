@@ -45,6 +45,8 @@ namespace Tunlify.Common
 
             Console.WriteLine("Connection established with " + Destination);
 
+            using var logFile = new FileStream("log.bin", FileMode.Create, FileAccess.Write, FileShare.Read);
+
             // Asynchronously forward the contents of a stream to a channel
             async Task forwardStreamToChannelAsync(NetworkStream stream, Channel<byte[]> channel) {
                 var buffer = ArrayPool<byte>.Shared.Rent(65536);
@@ -61,8 +63,10 @@ namespace Tunlify.Common
 
             // Consume the contents of a channel (the received data)
             async Task channelConsumer(Channel<byte[]> channel, NetworkStream dest) {
-                await foreach (var block in channel.Reader.ReadAllAsync())
-                    await dest.WriteAsync(block);
+                await foreach (var block in channel.Reader.ReadAllAsync()) {
+                    await Task.WhenAll(dest.WriteAsync(block).AsTask(), logFile.WriteAsync(block).AsTask());
+                    await logFile.FlushAsync();
+                }
 
                 Console.WriteLine("Channel complete");
             }
