@@ -5,8 +5,4 @@
     <LangVersion>8</LangVersion>
   </PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference Include="System.IO.Pipelines" Version="4.7.0" />
-  </ItemGroup>
-
 </Project>
