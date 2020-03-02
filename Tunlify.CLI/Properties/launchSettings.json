@@ -2,7 +2,7 @@
   "profiles": {
     "Tunlify.CLI": {
       "commandName": "Project",
-      "commandLineArgs": "--src 127.0.0.1:1234 --dst 216.58.207.206:80"
+      "commandLineArgs": "--src 127.0.0.1:1234 --dst 35.160.169.47:23"
     }
   }
 }
