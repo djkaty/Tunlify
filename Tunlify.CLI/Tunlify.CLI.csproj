@@ -5,6 +5,11 @@
     <TargetFramework>netcoreapp3.1</TargetFramework>
     <AssemblyName>tunlify</AssemblyName>
     <LangVersion>8</LangVersion>
+    <Authors>Katy Coe</Authors>
+    <Company>Katy Coe</Company>
+    <Product>Tunlify</Product>
+    <PackageId>Tunlify</PackageId>
+    <PackageProjectUrl>https://github.com/djkaty/Tunlify</PackageProjectUrl>
   </PropertyGroup>
 
   <ItemGroup>
