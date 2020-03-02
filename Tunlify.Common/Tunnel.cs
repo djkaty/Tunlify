@@ -90,6 +90,10 @@ namespace Tunlify.Common
         // The endpoint to forward to
         public IPEndPoint Destination { get; }
 
+        // Events that fire when there is network traffic
+        public event EventHandler<NetworkStreamEventArgs> ReceiveFromClient;
+        public event EventHandler<NetworkStreamEventArgs> ReceiveFromServer;
+
         public Tunnel(IPEndPoint src, IPEndPoint dst) => (Source, Destination) = (src, dst);
 
         // Start the tunnel
@@ -113,11 +117,9 @@ namespace Tunlify.Common
 
             Console.WriteLine("Connection established with " + Destination);
 
-            // Capture data to log file
-            using var logFile = new FileStream("log.bin", FileMode.Create, FileAccess.Write, FileShare.Read);
-
-            incomingStream.ReadBytes += async (s, e) => await logFile.WriteAsync(e.Data);
-            outgoingStream.ReadBytes += async (s, e) => await logFile.WriteAsync(e.Data);
+            // Connect subscribers
+            incomingStream.ReadBytes += ReceiveFromClient;
+            outgoingStream.ReadBytes += ReceiveFromServer;
 
             // Start tunneling
             var srcToDstForwarderTask = incomingStream.CopyToAsync(outgoingStream);

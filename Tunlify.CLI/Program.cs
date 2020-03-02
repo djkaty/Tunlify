@@ -3,6 +3,7 @@
  */
 
 using System;
+using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading.Tasks;
@@ -18,6 +19,9 @@ namespace Tunlify.CLI
 
         [Option("dst", Required = true, HelpText = "Destination IP address and port eg. 127.0.0.1:1234")]
         public string DestIP { get; set; }
+
+        [Option("log", Required = false, HelpText = "Pathname to traffic capture file")]
+        public string LogFilePath { get; set; }
     }
 
     class Program
@@ -41,12 +45,26 @@ namespace Tunlify.CLI
             Console.WriteLine(sourceIP);
             Console.WriteLine(destIP);
 
+            var tunnel = new Tunnel(sourceIP, destIP);
+
+            // Capture data to log file if requested
+            FileStream logFile = null;
+
+            if (!string.IsNullOrEmpty(options.LogFilePath)) {
+                logFile = new FileStream(options.LogFilePath, FileMode.Create, FileAccess.Write, FileShare.Read);
+
+                tunnel.ReceiveFromClient += async (s, e) => await logFile.WriteAsync(e.Data);
+                tunnel.ReceiveFromServer += async (s, e) => await logFile.WriteAsync(e.Data);
+            }
+
             try {
-                var tunnel = new Tunnel(sourceIP, destIP);
                 await tunnel.StartAsync();
             }
             catch (SocketException ex) {
                 Console.Error.WriteLine(ex.Message + " (Windows Sockets error code " + ex.ErrorCode + ")");
+            }
+            finally {
+                logFile?.Close();
             }
 
             return 0;
